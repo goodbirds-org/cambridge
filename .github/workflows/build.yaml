@@ -17,6 +17,14 @@ jobs:
       LOGO_BASENAME: goodbirds_logo_text.png
       MAP_LOGO_FILE: ${{ github.workspace }}/docs/goodbirds_logo_text.png
       MAP_LOGO_URL: https://goodbirds-org.github.io/cambridge/goodbirds_logo_text.png
+      ARCHIVE_URL: https://goodbirds-org.github.io/cambridge/
+      MAP_MAIN_TITLE: "Cambridge, MA & Vicinity"
+      CENTER_LAT: "42.378500"
+      CENTER_LON: "-71.115600"
+      DEFAULT_RADIUS_KM: "20"
+      BACK_DAYS: "2"
+      MAX_RESULTS: "200"
+      ZOOM_START: "11"
 
     steps:
       - name: Checkout
@@ -48,16 +56,26 @@ jobs:
           OUTPUT_DIR: ${{ env.OUTPUT_DIR }}
           MAP_LOGO_FILE: ${{ env.MAP_LOGO_FILE }}
           MAP_LOGO_URL: ${{ env.MAP_LOGO_URL }}
+          ARCHIVE_URL: ${{ env.ARCHIVE_URL }}
+          MAP_MAIN_TITLE: ${{ env.MAP_MAIN_TITLE }}
+          CENTER_LAT: ${{ env.CENTER_LAT }}
+          CENTER_LON: ${{ env.CENTER_LON }}
+          DEFAULT_RADIUS_KM: ${{ env.DEFAULT_RADIUS_KM }}
+          BACK_DAYS: ${{ env.BACK_DAYS }}
+          MAX_RESULTS: ${{ env.MAX_RESULTS }}
+          ZOOM_START: ${{ env.ZOOM_START }}
         run: |
           python scripts/build_map.py
 
-      - name: Rebuild archive index.html and link to newest file
+      - name: Rebuild archive index.html and link to newest file (with weekday)
         env:
           GIT_SHA: ${{ github.sha }}
         run: |
           python - <<'PY'
           import os, re
           from pathlib import Path
+          from datetime import datetime
+
           DOCS = Path("docs")
           MAPS = DOCS / "maps"
           DOCS.mkdir(exist_ok=True)
@@ -70,10 +88,11 @@ jobs:
             m = re.search(r"ebird_radius_map_(\d{4}-\d{2}-\d{2})_(\d{2}-\d{2}-\d{2})_ET_(\d+)km\.html$", p.name)
             if not m:
               continue
-            day = m.group(1)
-            time = m.group(2).replace("-", ":")
+            day = m.group(1)                       # YYYY-MM-DD
+            time = m.group(2).replace("-", ":")    # HH:MM:SS
             by_day.setdefault(day, []).append((time, p.name))
 
+          # Keep last 7 days
           day_keys = sorted(by_day.keys(), reverse=True)[:7]
           by_day = {k: by_day[k] for k in day_keys}
 
@@ -81,6 +100,11 @@ jobs:
           cache_bust = os.getenv("GIT_SHA","")[:8]
           latest_link_file = f"maps/{newest}"
           latest_link_cachebusted = f"maps/latest.html?v={cache_bust}" if cache_bust else "maps/latest.html"
+
+          def with_weekday(dstr):
+            # Convert YYYY-MM-DD -> 'Tue, 2025-09-02'
+            dt = datetime.strptime(dstr, "%Y-%m-%d")
+            return dt.strftime("%a, %Y-%m-%d")
 
           header = f"""
           <!doctype html>
@@ -125,8 +149,9 @@ jobs:
           for day in sorted(by_day.keys(), reverse=True):
             items = []
             for time, fname in sorted(by_day[day], reverse=True):
-              items.append(f'<li><a href="maps/{fname}">{day} {time} ET</a></li>')
-            sections.append(f'<div class="day"><h2>{day}</h2><ul>' + "\n".join(items) + "</ul></div>")
+              # Show weekday on each link too
+              items.append(f'<li><a href="maps/{fname}">{with_weekday(day)} {time} ET</a></li>')
+            sections.append(f'<div class="day"><h2>{with_weekday(day)}</h2><ul>' + "\n".join(items) + "</ul></div>")
 
           footer = """
               </div>
@@ -145,7 +170,7 @@ jobs:
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add -A
           if ! git diff --cached --quiet; then
-            git commit -m "Automated map build - update maps and archive"
+            git commit -m "Automated map build - update maps and archive (layer minimize + weekday dates)"
             git push
           else
             echo "No changes to commit."

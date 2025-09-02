@@ -1,15 +1,16 @@
 # scripts/build_map.py
 #
-# Changes in this version:
-# - No floating legend panel
-# - Each species layer in the Layers control shows a color swatch next to the checkbox and name
+# Updates:
+# - Layers control has a minimize/expand toggle to collapse the species list.
+# - Legend removed; each species in the Layers control shows a color swatch.
+# - Index page change is handled in build.yml (Python snippet) — not here.
 #
-# Other behavior unchanged:
-# - Popups list all checklists for that species at that exact location
-# - Bottom-left "i" button toggles a compact info panel aligned above it
-# - Labeled radius rings
-# - Robust logo loading (file -> data URL preferred, falls back to public URL)
-# - MiniMap removed
+# Existing behavior preserved:
+# - Popups list all checklists for that species at that location (deduped).
+# - Bottom-left "i" button opens compact info panel aligned above it.
+# - Concentric rings at 5, 10, 15, 20 km (labeled).
+# - Robust logo sourcing (embed if file found; fallback to public URL).
+# - No MiniMap.
 
 import os
 import sys
@@ -46,16 +47,15 @@ API_KEY = os.getenv("EBIRD_API_KEY", "").strip()
 if not API_KEY:
     API_KEY = "REPLACE_WITH_YOUR_EBIRD_API_KEY"
 
-# You can change these as needed per repo
-CENTER_LAT = 42.378500
-CENTER_LON = -71.115600
-DEFAULT_RADIUS_KM = 20
-BACK_DAYS = 2
-MAX_RESULTS = 200
-ZOOM_START = 11
-SPECIES_LAYER_THRESHOLD = 200
-ARCHIVE_URL = "https://goodbirds-org.github.io/cambridge/"
-MAP_MAIN_TITLE = "Cambridge, MA & Vicinity"
+CENTER_LAT = float(os.getenv("CENTER_LAT", "42.378500"))
+CENTER_LON = float(os.getenv("CENTER_LON", "-71.115600"))
+DEFAULT_RADIUS_KM = int(os.getenv("DEFAULT_RADIUS_KM", "20"))
+BACK_DAYS = int(os.getenv("BACK_DAYS", "2"))
+MAX_RESULTS = int(os.getenv("MAX_RESULTS", "200"))
+ZOOM_START = int(os.getenv("ZOOM_START", "11"))
+SPECIES_LAYER_THRESHOLD = int(os.getenv("SPECIES_LAYER_THRESHOLD", "200"))
+ARCHIVE_URL = os.getenv("ARCHIVE_URL", "https://goodbirds-org.github.io/cambridge/")
+MAP_MAIN_TITLE = os.getenv("MAP_MAIN_TITLE", "Cambridge, MA & Vicinity")
 
 # Logo config
 MAP_LOGO_FILE = os.getenv("MAP_LOGO_FILE", "").strip()
@@ -106,10 +106,7 @@ def get_data(lat, lon, radius_km, back_days):
 
 def add_radius_rings(m, lat, lon):
     # Center marker
-    folium.CircleMarker(
-        [lat, lon], radius=4, color="#2c7fb8", fill=True, fill_opacity=1, tooltip="Center"
-    ).add_to(m)
-
+    folium.CircleMarker([lat, lon], radius=4, color="#2c7fb8", fill=True, fill_opacity=1, tooltip="Center").add_to(m)
     # Concentric rings at 5, 10, 15, 20 km
     ring_specs = [
         (5,  "#555555", "5 km",  "5,7"),
@@ -121,26 +118,16 @@ def add_radius_rings(m, lat, lon):
         folium.Circle([lat, lon], radius=km_to_m(km),
                       color=color, fill=False, weight=(3 if km == 20 else 2),
                       opacity=0.9, dash_array=dash).add_to(m)
-        # Label north of center at the same longitude
-        folium.Marker(
-            [lat + km/111.0, lon],
-            icon=folium.DivIcon(html=f"<div style='font-size:12px; color:{color}; font-weight:{'bold' if km==20 else 'normal'};'>{label}</div>")
-        ).add_to(m)
+        folium.Marker([lat + km/111.0, lon],
+                      icon=folium.DivIcon(html=f"<div style='font-size:12px; color:{color}; font-weight:{'bold' if km==20 else 'normal'};'>{label}</div>")
+                      ).add_to(m)
 
 def add_notice(m, text: str):
     html = f"""
     <div style="
-      position: fixed;
-      top: 50%;
-      left: 50%;
-      transform: translate(-50%, -50%);
-      background: rgba(255,255,255,0.95);
-      padding: 10px 14px;
-      border: 1px solid #999;
-      border-radius: 6px;
-      z-index: 1500;
-      font-size: 14px;
-      box-shadow: 0 1px 4px rgba(0,0,0,0.2);
+      position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%);
+      background: rgba(255,255,255,0.95); padding: 10px 14px; border: 1px solid #999;
+      border-radius: 6px; z-index: 1500; font-size: 14px; box-shadow: 0 1px 4px rgba(0,0,0,0.2);
     ">{text}</div>
     """
     m.get_root().html.add_child(folium.Element(html))
@@ -151,8 +138,7 @@ def compute_dt_et():
     run_slot = os.getenv("RUN_SLOT", "")
     try:
         if run_date and run_slot in ("12", "21"):
-            y, mo, d = map(int, run_date.split("-"))
-            h = int(run_slot)
+            y, mo, d = map(int, run_date.split("-")); h = int(run_slot)
             dt = datetime(y, mo, d, h, 0, 0, tzinfo=tz)
         else:
             dt = datetime.now(tz)
@@ -173,13 +159,11 @@ def _file_to_data_url(path: str) -> str:
 def get_logo_src() -> str:
     if MAP_LOGO_FILE and os.path.isfile(MAP_LOGO_FILE):
         d = _file_to_data_url(MAP_LOGO_FILE)
-        if d:
-            return d
+        if d: return d
     for p in (os.path.join("docs", DEFAULT_LOGO_NAME), DEFAULT_LOGO_NAME):
         if os.path.isfile(p):
             d = _file_to_data_url(p)
-            if d:
-                return d
+            if d: return d
     if MAP_LOGO_URL:
         return MAP_LOGO_URL
     return ARCHIVE_URL + DEFAULT_LOGO_NAME
@@ -189,78 +173,52 @@ def build_info_ui(radius_km: int, back_days: int, ts_display_et: str, logo_src: 
     html = """
     <style>
       .gb-info-btn {{
-        position: fixed;
-        left: 16px;
-        bottom: 16px;
-        width: 44px;
-        height: 44px;
-        border-radius: 50%;
-        background: #ffffff;
-        border: 1px solid #999;
-        box-shadow: 0 2px 6px rgba(0,0,0,0.25);
-        z-index: 1201;
-        display: flex;
-        align-items: center;
-        justify-content: center;
+        position: fixed; left: 16px; bottom: 16px; width: 44px; height: 44px; border-radius: 50%;
+        background: #ffffff; border: 1px solid #999; box-shadow: 0 2px 6px rgba(0,0,0,0.25);
+        z-index: 1201; display: flex; align-items: center; justify-content: center;
         font: 700 18px/1 system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif;
-        cursor: pointer;
-        user-select: none;
+        cursor: pointer; user-select: none;
       }}
       .gb-info-btn:focus {{ outline: 2px solid #2c7fb8; }}
 
       .gb-info-panel {{
-        position: fixed;
-        left: 16px;     /* align with the button */
-        bottom: 70px;   /* raise above button */
-        z-index: 1200;
-        background: rgba(255,255,255,0.98);
-        border: 1px solid #999;
-        border-radius: 10px;
-        box-shadow: 0 2px 6px rgba(0,0,0,0.3);
-        padding: 12px;
-        width: min(92vw, 360px);
-        max-height: 70vh;
-        display: none;
+        position: fixed; left: 16px; bottom: 70px; z-index: 1200;
+        background: rgba(255,255,255,0.98); border: 1px solid #999; border-radius: 10px;
+        box-shadow: 0 2px 6px rgba(0,0,0,0.3); padding: 12px; width: min(92vw, 360px);
+        max-height: 70vh; display: none;
       }}
-      .gb-info-header {{
-        display: grid;
-        grid-template-columns: auto 1fr;
-        grid-gap: 12px;
-        align-items: center;
-      }}
+      .gb-info-header {{ display: grid; grid-template-columns: auto 1fr; grid-gap: 12px; align-items: center; }}
       .gb-info-title {{ font-weight: 700; font-size: 16px; margin: 0; }}
       .gb-info-meta {{ font-size: 13px; margin-top: 2px; }}
       .gb-info-row {{ margin-top: 6px; display: flex; gap: 12px; font-size: 12px; }}
-      .gb-info-close {{ position: absolute; right: 8px; top: 6px; border: none; background: transparent; font-size: 18px; cursor: pointer; }}
-      @media (max-width: 480px) {{
-        .gb-info-panel {{ width: 92vw; }}
-        .gb-info-title {{ font-size: 15px; }}
-        .gb-info-meta {{ font-size: 12px; }}
-        .gb-info-row {{ font-size: 11px; }}
+
+      /* Tighter Layers control spacing and a header with minimize button */
+      .leaflet-control-layers {{
+        max-height: 75vh; overflow: auto;
       }}
-      /* Tighter Layers control spacing helps long species lists */
+      .gb-layers-head {{
+        display: flex; align-items: center; justify-content: space-between;
+        font: 600 13px/1.2 system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif;
+        padding: 4px 6px; border-bottom: 1px solid #ddd; margin-bottom: 4px;
+      }}
+      .gb-layer-toggle {{
+        border: 1px solid #999; border-radius: 4px; padding: 0 6px; font-size: 12px; cursor: pointer;
+        background: #fff;
+      }}
       .leaflet-control-layers-overlays label {{
-        display: flex;
-        align-items: center;
-        gap: 6px;
-        line-height: 1.2;
-        margin-bottom: 4px;
+        display: flex; align-items: center; gap: 6px; line-height: 1.2; margin-bottom: 4px;
       }}
     </style>
 
     <div class="gb-info-btn" id="gbInfoBtn" role="button" aria-label="Show map info" aria-expanded="false">i</div>
 
     <div class="gb-info-panel" id="gbInfoPanel" aria-hidden="true">
-      <button class="gb-info-close" id="gbInfoClose" aria-label="Close info">×</button>
       <div class="gb-info-header">
         <div>{logo_img}</div>
         <div>
           <h3 class="gb-info-title">{title}</h3>
           <div class="gb-info-meta">eBird Notable · {radius} km radius · last {back} day(s)</div>
-          <div class="gb-info-row">
-            <span>Built: {ts}</span>
-            <a href="{archive}" target="_blank" rel="noopener">Archive</a>
-          </div>
+          <div class="gb-info-row"><span>Built: {ts}</span> <a href="{archive}" target="_blank" rel="noopener">Archive</a></div>
         </div>
       </div>
     </div>
@@ -269,34 +227,14 @@ def build_info_ui(radius_km: int, back_days: int, ts_display_et: str, logo_src: 
       (function() {{
         var btn = document.getElementById('gbInfoBtn');
         var panel = document.getElementById('gbInfoPanel');
-        var closeBtn = document.getElementById('gbInfoClose');
-
         function openPanel() {{
-          panel.style.display = 'block';
-          btn.setAttribute('aria-expanded', 'true');
-          panel.setAttribute('aria-hidden', 'false');
+          panel.style.display = 'block'; btn.setAttribute('aria-expanded','true'); panel.setAttribute('aria-hidden','false');
         }}
         function closePanel() {{
-          panel.style.display = 'none';
-          btn.setAttribute('aria-expanded', 'false');
-          panel.setAttribute('aria-hidden', 'true');
+          panel.style.display = 'none'; btn.setAttribute('aria-expanded','false'); panel.setAttribute('aria-hidden','true');
         }}
-
-        btn.addEventListener('click', function(e) {{
-          if (panel.style.display === 'block') {{
-            closePanel();
-          }} else {{
-            openPanel();
-          }}
-        }});
-        closeBtn.addEventListener('click', function(e) {{
-          closePanel();
-        }});
-        document.addEventListener('click', function(e) {{
-          if (!panel.contains(e.target) && e.target !== btn) {{
-            closePanel();
-          }}
-        }});
+        btn.addEventListener('click', function() {{ panel.style.display === 'block' ? closePanel() : openPanel(); }});
+        document.addEventListener('click', function(e) {{ if (!panel.contains(e.target) && e.target !== btn) closePanel(); }});
       }})();
     </script>
     """.format(
@@ -323,33 +261,22 @@ def add_clear_species_control(m: folium.Map, species_names):
           var input = label.querySelector('input[type=checkbox]');
           if(!input) return;
           var name = label.textContent.trim();
-          if (speciesSet.has(name) && input.checked) {{
-            input.click();
-          }}
+          if (speciesSet.has(name) && input.checked) input.click();
         }});
       }}
       var ClearCtl = L.Control.extend({{
         onAdd: function(map) {{
           var div = L.DomUtil.create('div', 'leaflet-bar');
-          div.style.background = 'white';
-          div.style.padding = '4px 6px';
-          div.style.cursor = 'pointer';
-          div.style.font = '12px/1.2 sans-serif';
-          div.style.boxShadow = '0 1px 4px rgba(0,0,0,0.2)';
-          div.title = 'Uncheck all species layers';
-          div.innerHTML = 'Clear species';
-          L.DomEvent.on(div, 'click', function(e) {{
-            L.DomEvent.stop(e);
-            clearSpecies();
-          }});
+          div.style.background = 'white'; div.style.padding = '4px 6px'; div.style.cursor = 'pointer';
+          div.style.font = '12px/1.2 sans-serif'; div.style.boxShadow = '0 1px 4px rgba(0,0,0,0.2)';
+          div.title = 'Uncheck all species layers'; div.innerHTML = 'Clear species';
+          L.DomEvent.on(div, 'click', function(e) {{ L.DomEvent.stop(e); clearSpecies(); }});
           return div;
         }},
         onRemove: function(map) {{}}
       }});
       function addWhenReady() {{
-        if (!document.querySelector('.leaflet-control-layers')) {{
-          return setTimeout(addWhenReady, 150);
-        }}
+        if (!document.querySelector('.leaflet-control-layers')) return setTimeout(addWhenReady, 150);
         (new ClearCtl({{ position: 'topright' }})).addTo({m.get_name()});
       }}
       addWhenReady();
@@ -359,10 +286,6 @@ def add_clear_species_control(m: folium.Map, species_names):
     m.get_root().html.add_child(folium.Element(js))
 
 def add_color_swatches_to_layer_control(m: folium.Map, species_to_color: OrderedDict):
-    """
-    Inject a small colored square before each species name in the Layers control.
-    We map by exact layer label text (species name).
-    """
     mapping = dict(species_to_color)
     js = f"""
     <script>
@@ -370,22 +293,39 @@ def add_color_swatches_to_layer_control(m: folium.Map, species_to_color: Ordered
       var colorMap = {mapping!r}; // species -> hex color
 
       function decorate() {{
+        var ctl = document.querySelector('.leaflet-control-layers');
         var root = document.querySelector('.leaflet-control-layers-overlays');
-        if (!root) return false;
+        if (!ctl || !root) return false;
+
+        // Add a header bar with a minimize/expand toggle
+        if (!ctl.querySelector('.gb-layers-head')) {{
+          var head = document.createElement('div');
+          head.className = 'gb-layers-head';
+          var title = document.createElement('div'); title.textContent = 'Species Layers';
+          var btn = document.createElement('button'); btn.className = 'gb-layer-toggle'; btn.type = 'button';
+          btn.setAttribute('aria-expanded', 'true'); btn.textContent = 'Collapse';
+          btn.addEventListener('click', function() {{
+            if (root.style.display === 'none') {{
+              root.style.display = ''; btn.textContent = 'Collapse'; btn.setAttribute('aria-expanded', 'true');
+            }} else {{
+              root.style.display = 'none'; btn.textContent = 'Expand'; btn.setAttribute('aria-expanded', 'false');
+            }}
+          }});
+          head.appendChild(title); head.appendChild(btn);
+          // Insert head at top of control
+          var form = ctl.querySelector('form') || ctl;
+          form.insertBefore(head, form.firstChild);
+        }}
+
+        // Inject color swatches next to each checkbox label
         var labels = root.querySelectorAll('label');
         labels.forEach(function(label) {{
-          // Avoid duplicating swatches
           if (label.querySelector('.gb-swatch')) return;
-
-          // Get the plain text name for matching
           var txt = label.textContent.trim();
           var color = colorMap[txt];
           if (!color) return;
-
-          // Insert swatch right after the checkbox input
           var input = label.querySelector('input[type=checkbox]');
           if (!input) return;
-
           var swatch = document.createElement('span');
           swatch.className = 'gb-swatch';
           swatch.style.display = 'inline-block';
@@ -394,18 +334,12 @@ def add_color_swatches_to_layer_control(m: folium.Map, species_to_color: Ordered
           swatch.style.border = '1px solid #222';
           swatch.style.margin = '0 6px 0 6px';
           swatch.style.background = color;
-
-          // Insert after checkbox input
           input.insertAdjacentElement('afterend', swatch);
         }});
         return true;
       }}
 
-      function whenReady() {{
-        if (!decorate()) {{
-          setTimeout(whenReady, 200);
-        }}
-      }}
+      function whenReady() {{ if (!decorate()) setTimeout(whenReady, 200); }}
       whenReady();
     }})();
     </script>
@@ -462,7 +396,6 @@ def make_map(lat=CENTER_LAT, lon=CENTER_LON, radius_km=DEFAULT_RADIUS_KM,
 
     if not data:
         add_notice(m, "No current notable birds for the selected window.")
-        # No legend injection here by design
         add_clear_species_control(m, [])
         save_and_publish(m, outfile)
         return m, outfile
@@ -471,8 +404,7 @@ def make_map(lat=CENTER_LAT, lon=CENTER_LON, radius_km=DEFAULT_RADIUS_KM,
     loc_species = defaultdict(lambda: defaultdict(list))
     species_set = set()
     for s in data:
-        slat = s.get("lat")
-        slon = s.get("lng")
+        slat = s.get("lat"); slon = s.get("lng")
         sp = s.get("comName") or "Unknown"
         species_set.add(sp)
         loc_name = s.get("locName") or "Unknown location"
@@ -480,46 +412,36 @@ def make_map(lat=CENTER_LAT, lon=CENTER_LON, radius_km=DEFAULT_RADIUS_KM,
         how_many = s.get("howMany", None)
         checklist_id = s.get("subId") or ""
         checklist_url = f"https://ebird.org/checklist/{checklist_id}" if checklist_id else ""
-        loc_species[(slat, slon)][sp].append(
-            {
-                "loc_name": loc_name,
-                "obs_date": obs_date,
-                "how_many": how_many,
-                "checklist_id": checklist_id,
-                "checklist_url": checklist_url,
-            }
-        )
+        loc_species[(slat, slon)][sp].append({
+            "loc_name": loc_name,
+            "obs_date": obs_date,
+            "how_many": how_many,
+            "checklist_id": checklist_id,
+            "checklist_url": checklist_url,
+        })
 
     species_to_color = OrderedDict(sorted([(sp, color_for_species(sp)) for sp in species_set], key=lambda x: x[0]))
     too_many = len(species_to_color) > SPECIES_LAYER_THRESHOLD
 
     def popup_html_for_entries(sp: str, loc_name: str, entries: list) -> str:
-        seen = set()
-        items = []
+        seen = set(); items = []
         for e in entries:
             cid = e["checklist_id"]
-            if cid in seen:
-                continue
+            if cid in seen: continue
             seen.add(cid)
             count_txt = f" ({e['how_many']})" if e["how_many"] not in (None, "Unknown") else ""
             if e["checklist_url"]:
-                items.append(
-                    f"<li><a href='{e['checklist_url']}' target='_blank' rel='noopener'>Checklist</a> – {e['obs_date']}{count_txt}</li>"
-                )
+                items.append(f"<li><a href='{e['checklist_url']}' target='_blank' rel='noopener'>Checklist</a> – {e['obs_date']}{count_txt}</li>")
             else:
                 items.append(f"<li>{e['obs_date']}{count_txt}</li>")
         lst = "<ul style='margin:6px 0 0 16px; padding:0;'>" + "".join(items) + "</ul>" if items else "<div>No checklists.</div>"
-        return (
-            "<div style='font-size:13px;'>"
-            f"<div><b>{sp}</b></div>"
-            f"<div><b>Location:</b> {loc_name}</div>"
-            "<div style='margin-top:6px; font-weight:600;'>Checklists:</div>"
-            f"{lst}"
-            "</div>"
-        )
+        return ("<div style='font-size:13px;'>"
+                f"<div><b>{sp}</b></div>"
+                f"<div><b>Location:</b> {loc_name}</div>"
+                "<div style='margin-top:6px; font-weight:600;'>Checklists:</div>"
+                f"{lst}</div>")
 
     if not too_many:
-        # One layer per species, cluster within it
         species_groups = {}
         for sp, hexcol in species_to_color.items():
             fg = folium.FeatureGroup(name=sp, show=True)
@@ -527,51 +449,33 @@ def make_map(lat=CENTER_LAT, lon=CENTER_LON, radius_km=DEFAULT_RADIUS_KM,
             fg.add_child(cluster)
             species_groups[sp] = (fg, cluster)
             m.add_child(fg)
-
         for (slat, slon), species_dict in loc_species.items():
             for sp, entries in species_dict.items():
                 hexcol = species_to_color.get(sp, "#444444")
                 loc_name = entries[0]["loc_name"]
                 popup_html = popup_html_for_entries(sp, loc_name, entries)
-                icon = folium.DivIcon(
-                    html=f"<div style='width:14px;height:14px;border-radius:50%;background:{hexcol};border:1.5px solid #222;'></div>",
-                    icon_size=(14, 14), icon_anchor=(7, 7),
-                )
-                folium.Marker(
-                    [slat, slon],
-                    icon=icon,
-                    tooltip=sp,
-                    popup=folium.Popup(popup_html, max_width=320)
-                ).add_to(species_groups[sp][1])
-
+                icon = folium.DivIcon(html=f"<div style='width:14px;height:14px;border-radius:50%;background:{hexcol};border:1.5px solid #222;'></div>",
+                                      icon_size=(14, 14), icon_anchor=(7, 7))
+                folium.Marker([slat, slon], icon=icon, tooltip=sp,
+                              popup=folium.Popup(popup_html, max_width=320)).add_to(species_groups[sp][1])
         folium.LayerControl(collapsed=False).add_to(m)
         add_clear_species_control(m, list(species_to_color.keys()))
         add_color_swatches_to_layer_control(m, species_to_color)
-
     else:
-        # Single clustered layer if too many species
         cluster = MarkerCluster(name="Notable sightings").add_to(m)
         for (slat, slon), species_dict in loc_species.items():
             for sp, entries in species_dict.items():
                 hexcol = species_to_color.get(sp, "#444444")
                 loc_name = entries[0]["loc_name"]
                 popup_html = popup_html_for_entries(sp, loc_name, entries)
-                icon = folium.DivIcon(
-                    html=f"<div style='width:14px;height:14px;border-radius:50%;background:{hexcol};border:1.5px solid #222;'></div>",
-                    icon_size=(14, 14), icon_anchor=(7, 7),
-                )
-                folium.Marker(
-                    [slat, slon],
-                    icon=icon,
-                    tooltip=sp,
-                    popup=folium.Popup(popup_html, max_width=320)
-                ).add_to(cluster)
-
+                icon = folium.DivIcon(html=f"<div style='width:14px;height:14px;border-radius:50%;background:{hexcol};border:1.5px solid #222;'></div>",
+                                      icon_size=(14, 14), icon_anchor=(7, 7))
+                folium.Marker([slat, slon], icon=icon, tooltip=sp,
+                              popup=folium.Popup(popup_html, max_width=320)).add_to(cluster)
         folium.LayerControl(collapsed=False).add_to(m)
         add_clear_species_control(m, list(species_to_color.keys()))
         add_color_swatches_to_layer_control(m, species_to_color)
 
-    # No legend added here on purpose
     save_and_publish(m, outfile)
     return m, outfile
 
