@@ -67,7 +67,7 @@ jobs:
         run: |
           python scripts/build_map.py
 
-      - name: Rebuild archive index.html and link to newest file (with weekday)
+      - name: Rebuild archive index.html and link to newest file (full weekday)
         env:
           GIT_SHA: ${{ github.sha }}
         run: |
@@ -101,10 +101,10 @@ jobs:
           latest_link_file = f"maps/{newest}"
           latest_link_cachebusted = f"maps/latest.html?v={cache_bust}" if cache_bust else "maps/latest.html"
 
-          def with_weekday(dstr):
-            # Convert YYYY-MM-DD -> 'Tue, 2025-09-02'
+          def with_weekday_long(dstr):
+            # Convert YYYY-MM-DD -> 'Tuesday, 2025-09-02'
             dt = datetime.strptime(dstr, "%Y-%m-%d")
-            return dt.strftime("%a, %Y-%m-%d")
+            return dt.strftime("%A, %Y-%m-%d")
 
           header = f"""
           <!doctype html>
@@ -149,9 +149,8 @@ jobs:
           for day in sorted(by_day.keys(), reverse=True):
             items = []
             for time, fname in sorted(by_day[day], reverse=True):
-              # Show weekday on each link too
-              items.append(f'<li><a href="maps/{fname}">{with_weekday(day)} {time} ET</a></li>')
-            sections.append(f'<div class="day"><h2>{with_weekday(day)}</h2><ul>' + "\n".join(items) + "</ul></div>")
+              items.append(f'<li><a href="maps/{fname}">{with_weekday_long(day)} {time} ET</a></li>')
+            sections.append(f'<div class="day"><h2>{with_weekday_long(day)}</h2><ul>' + "\n".join(items) + "</ul></div>")
 
           footer = """
               </div>
@@ -170,7 +169,7 @@ jobs:
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add -A
           if ! git diff --cached --quiet; then
-            git commit -m "Automated map build - update maps and archive (layer minimize + weekday dates)"
+            git commit -m "Remove Measure tool; show full weekday names on archive"
             git push
           else
             echo "No changes to commit."

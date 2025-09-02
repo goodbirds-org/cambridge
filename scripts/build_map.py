@@ -1,16 +1,10 @@
 # scripts/build_map.py
 #
-# Updates:
-# - Layers control has a minimize/expand toggle to collapse the species list.
-# - Legend removed; each species in the Layers control shows a color swatch.
-# - Index page change is handled in build.yml (Python snippet) — not here.
-#
-# Existing behavior preserved:
-# - Popups list all checklists for that species at that location (deduped).
-# - Bottom-left "i" button opens compact info panel aligned above it.
-# - Concentric rings at 5, 10, 15, 20 km (labeled).
-# - Robust logo sourcing (embed if file found; fallback to public URL).
-# - No MiniMap.
+# Changes in this version:
+# - Removed the Measure tool from the map
+# - Legend remains removed; color swatches appear in the layer list
+# - Layer list includes a Collapse/Expand toggle
+# - Full existing behavior preserved otherwise
 
 import os
 import sys
@@ -22,7 +16,7 @@ from zoneinfo import ZoneInfo
 from collections import defaultdict, OrderedDict
 
 import folium
-from folium.plugins import MarkerCluster, Fullscreen, MeasureControl, LocateControl, MousePosition
+from folium.plugins import MarkerCluster, Fullscreen, LocateControl, MousePosition
 
 try:
     from IPython.display import display  # noqa: F401
@@ -172,42 +166,39 @@ def build_info_ui(radius_km: int, back_days: int, ts_display_et: str, logo_src: 
     logo_img = "<img src='{src}' alt='Goodbirds logo' style='height:100px;display:block;'>".format(src=logo_src)
     html = """
     <style>
-      .gb-info-btn {{
+      .gb-info-btn {
         position: fixed; left: 16px; bottom: 16px; width: 44px; height: 44px; border-radius: 50%;
         background: #ffffff; border: 1px solid #999; box-shadow: 0 2px 6px rgba(0,0,0,0.25);
         z-index: 1201; display: flex; align-items: center; justify-content: center;
         font: 700 18px/1 system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif;
         cursor: pointer; user-select: none;
-      }}
-      .gb-info-btn:focus {{ outline: 2px solid #2c7fb8; }}
+      }
+      .gb-info-btn:focus { outline: 2px solid #2c7fb8; }
 
-      .gb-info-panel {{
+      .gb-info-panel {
         position: fixed; left: 16px; bottom: 70px; z-index: 1200;
         background: rgba(255,255,255,0.98); border: 1px solid #999; border-radius: 10px;
         box-shadow: 0 2px 6px rgba(0,0,0,0.3); padding: 12px; width: min(92vw, 360px);
         max-height: 70vh; display: none;
-      }}
-      .gb-info-header {{ display: grid; grid-template-columns: auto 1fr; grid-gap: 12px; align-items: center; }}
-      .gb-info-title {{ font-weight: 700; font-size: 16px; margin: 0; }}
-      .gb-info-meta {{ font-size: 13px; margin-top: 2px; }}
-      .gb-info-row {{ margin-top: 6px; display: flex; gap: 12px; font-size: 12px; }}
+      }
+      .gb-info-header { display: grid; grid-template-columns: auto 1fr; grid-gap: 12px; align-items: center; }
+      .gb-info-title { font-weight: 700; font-size: 16px; margin: 0; }
+      .gb-info-meta { font-size: 13px; margin-top: 2px; }
+      .gb-info-row { margin-top: 6px; display: flex; gap: 12px; font-size: 12px; }
 
-      /* Tighter Layers control spacing and a header with minimize button */
-      .leaflet-control-layers {{
-        max-height: 75vh; overflow: auto;
-      }}
-      .gb-layers-head {{
+      .leaflet-control-layers { max-height: 75vh; overflow: auto; }
+      .gb-layers-head {
         display: flex; align-items: center; justify-content: space-between;
         font: 600 13px/1.2 system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif;
         padding: 4px 6px; border-bottom: 1px solid #ddd; margin-bottom: 4px;
-      }}
-      .gb-layer-toggle {{
+      }
+      .gb-layer-toggle {
         border: 1px solid #999; border-radius: 4px; padding: 0 6px; font-size: 12px; cursor: pointer;
         background: #fff;
-      }}
-      .leaflet-control-layers-overlays label {{
+      }
+      .leaflet-control-layers-overlays label {
         display: flex; align-items: center; gap: 6px; line-height: 1.2; margin-bottom: 4px;
-      }}
+      }
     </style>
 
     <div class="gb-info-btn" id="gbInfoBtn" role="button" aria-label="Show map info" aria-expanded="false">i</div>
@@ -224,18 +215,18 @@ def build_info_ui(radius_km: int, back_days: int, ts_display_et: str, logo_src: 
     </div>
 
     <script>
-      (function() {{
+      (function() {
         var btn = document.getElementById('gbInfoBtn');
         var panel = document.getElementById('gbInfoPanel');
-        function openPanel() {{
+        function openPanel() {
           panel.style.display = 'block'; btn.setAttribute('aria-expanded','true'); panel.setAttribute('aria-hidden','false');
-        }}
-        function closePanel() {{
+        }
+        function closePanel() {
           panel.style.display = 'none'; btn.setAttribute('aria-expanded','false'); panel.setAttribute('aria-hidden','true');
-        }}
-        btn.addEventListener('click', function() {{ panel.style.display === 'block' ? closePanel() : openPanel(); }});
-        document.addEventListener('click', function(e) {{ if (!panel.contains(e.target) && e.target !== btn) closePanel(); }});
-      }})();
+        }
+        btn.addEventListener('click', function() { panel.style.display === 'block' ? closePanel() : openPanel(); });
+        document.addEventListener('click', function(e) { if (!panel.contains(e.target) && e.target !== btn) closePanel(); });
+      })();
     </script>
     """.format(
         logo_img=logo_img,
@@ -312,7 +303,6 @@ def add_color_swatches_to_layer_control(m: folium.Map, species_to_color: Ordered
             }}
           }});
           head.appendChild(title); head.appendChild(btn);
-          // Insert head at top of control
           var form = ctl.querySelector('form') || ctl;
           form.insertBefore(head, form.firstChild);
         }}
@@ -389,8 +379,7 @@ def make_map(lat=CENTER_LAT, lon=CENTER_LON, radius_km=DEFAULT_RADIUS_KM,
 
     add_radius_rings(m, lat, lon)
     Fullscreen().add_to(m)
-    # MiniMap removed
-    m.add_child(MeasureControl(primary_length_unit="kilometers"))
+    # Measure control removed
     LocateControl(auto_start=False, keepCurrentZoomLevel=False).add_to(m)
     MousePosition(separator=" , ", prefix="Lat, Lon:").add_to(m)
 
