@@ -1,14 +1,10 @@
 # scripts/build_map.py
 #
-# Cambridge build:
-# - Title: "Cambridge, MA & Vicinity"
-# - Center: 42.378500, -71.115600
-# - Rings at 5, 10, 15, 20 km (all labeled)
-# - Search radius set to 20 km to match outer ring
-# - Same UI as your last build: bottom-left "i" button toggles info panel aligned above it
-# - Popups list all checklists for that species at that exact location
-# - Robust logo loading (file -> data URL; fallback to public URL)
-# - Legend raised, MiniMap removed
+# Changes in this version:
+# - Removed the separate on-map legend box
+# - Inject a colored swatch next to each species name inside the LayerControl
+# - Keeps prior behavior: info "i" panel aligned above button, labeled radius rings,
+#   popups list all checklists for that species at that lat/lon, no MiniMap
 
 import os
 import sys
@@ -45,15 +41,16 @@ API_KEY = os.getenv("EBIRD_API_KEY", "").strip()
 if not API_KEY:
     API_KEY = "REPLACE_WITH_YOUR_EBIRD_API_KEY"
 
-CENTER_LAT = 42.378500
-CENTER_LON = -71.115600
-DEFAULT_RADIUS_KM = 20  # match the outer ring
-BACK_DAYS = 2
-MAX_RESULTS = 200
-ZOOM_START = 11
-SPECIES_LAYER_THRESHOLD = 200
-ARCHIVE_URL = "https://goodbirds-org.github.io/cambridge/"
-MAP_MAIN_TITLE = "Cambridge, MA & Vicinity"
+# Defaults can be overridden via env if you reuse this script elsewhere
+CENTER_LAT = float(os.getenv("CENTER_LAT", "42.378500"))
+CENTER_LON = float(os.getenv("CENTER_LON", "-71.115600"))
+DEFAULT_RADIUS_KM = int(os.getenv("DEFAULT_RADIUS_KM", "20"))
+BACK_DAYS = int(os.getenv("BACK_DAYS", "2"))
+MAX_RESULTS = int(os.getenv("MAX_RESULTS", "200"))
+ZOOM_START = int(os.getenv("ZOOM_START", "11"))
+SPECIES_LAYER_THRESHOLD = int(os.getenv("SPECIES_LAYER_THRESHOLD", "200"))
+ARCHIVE_URL = os.getenv("ARCHIVE_URL", "https://goodbirds-org.github.io/cambridge/")
+MAP_MAIN_TITLE = os.getenv("MAP_MAIN_TITLE", "Cambridge, MA & Vicinity")
 
 # Logo config
 MAP_LOGO_FILE = os.getenv("MAP_LOGO_FILE", "").strip()
@@ -101,37 +98,6 @@ def get_data(lat, lon, radius_km, back_days):
     data = fetch_notable(lat, lon, radius_km, back_days)
     _CACHE[key] = data
     return data
-
-def build_legend_html(species_to_color: OrderedDict) -> str:
-    items = "".join(
-        f"<div style='display:flex;align-items:center;margin:2px 0;'>"
-        f"<span style='display:inline-block;width:12px;height:12px;background:{hexcolor};"
-        f"margin-right:6px;border:1px solid #333;flex:0 0 12px;'></span>"
-        f"<span style='font-size:12px;line-height:1.2'>{sp}</span></div>"
-        for sp, hexcolor in species_to_color.items()
-    )
-    html = f"""
-    <div id="legend" style="
-        position: fixed;
-        bottom: 48px;
-        right: 16px;
-        z-index: 900;
-        background: rgba(255,255,255,0.95);
-        padding: 8px 10px;
-        border: 1px solid #888;
-        border-radius: 6px;
-        max-height: 70vh;
-        max-width: 28vw;
-        overflow-y: auto;
-        overflow-x: hidden;
-        resize: vertical;
-        box-shadow: 0 1px 4px rgba(0,0,0,0.2);
-        ">
-        <div style="font-weight:600;margin-bottom:6px;">Species Legend</div>
-        {items if items else "<div style='font-size:12px;'>No species</div>"}
-    </div>
-    """
-    return html
 
 def add_radius_rings(m, lat, lon):
     # Center marker
@@ -200,6 +166,7 @@ def _file_to_data_url(path: str) -> str:
         return ""
 
 def get_logo_src() -> str:
+    # Prefer embedded data URL from local file so map HTML is self-contained
     if MAP_LOGO_FILE and os.path.isfile(MAP_LOGO_FILE):
         d = _file_to_data_url(MAP_LOGO_FILE)
         if d:
@@ -233,12 +200,14 @@ def build_info_ui(radius_km: int, back_days: int, ts_display_et: str, logo_src: 
         justify-content: center;
         font: 700 18px/1 system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif;
         cursor: pointer;
-        user-select: none.
+        user-select: none;
       }}
+      .gb-info-btn:focus {{ outline: 2px solid #2c7fb8; }}
+
       .gb-info-panel {{
         position: fixed;
-        left: 16px;
-        bottom: 70px;
+        left: 16px;     /* align with the button */
+        bottom: 70px;   /* raise above button */
         z-index: 1200;
         background: rgba(255,255,255,0.98);
         border: 1px solid #999;
@@ -255,10 +224,34 @@ def build_info_ui(radius_km: int, back_days: int, ts_display_et: str, logo_src: 
         grid-gap: 12px;
         align-items: center;
       }}
-      .gb-info-title {{ font-weight: 700; font-size: 16px; margin: 0; }}
-      .gb-info-meta {{ font-size: 13px; margin-top: 2px; }}
-      .gb-info-row {{ margin-top: 6px; display: flex; gap: 12px; font-size: 12px; }}
-      .gb-info-close {{ position: absolute; right: 8px; top: 6px; border: none; background: transparent; font-size: 18px; cursor: pointer; }}
+      .gb-info-title {{
+        font-weight: 700;
+        font-size: 16px;
+        margin: 0;
+      }}
+      .gb-info-meta {{
+        font-size: 13px;
+        margin-top: 2px;
+      }}
+      .gb-info-row {{
+        margin-top: 6px;
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        font-size: 12px;
+      }}
+      .gb-info-close {{
+        position: absolute;
+        right: 8px;
+        top: 6px;
+        border: none;
+        background: transparent;
+        font-size: 18px;
+        cursor: pointer;
+        line-height: 1;
+      }}
+      .gb-info-close:focus {{ outline: 2px solid #2c7fb8; }}
+
       @media (max-width: 480px) {{
         .gb-info-panel {{ width: 92vw; }}
         .gb-info-title {{ font-size: 15px; }}
@@ -311,6 +304,8 @@ def build_info_ui(radius_km: int, back_days: int, ts_display_et: str, logo_src: 
         closeBtn.addEventListener('click', function(e) {{
           closePanel();
         }});
+
+        // Close panel when clicking outside it
         document.addEventListener('click', function(e) {{
           if (!panel.contains(e.target) && e.target !== btn) {{
             closePanel();
@@ -341,7 +336,8 @@ def add_clear_species_control(m: folium.Map, species_names):
         labels.forEach(function(label){{
           var input = label.querySelector('input[type=checkbox]');
           if(!input) return;
-          var name = label.textContent.trim();
+          var nameSpan = label.querySelector('span');
+          var name = nameSpan ? nameSpan.textContent.trim() : label.textContent.trim();
           if (speciesSet.has(name) && input.checked) {{
             input.click();
           }}
@@ -372,6 +368,57 @@ def add_clear_species_control(m: folium.Map, species_names):
         (new ClearCtl({{ position: 'topright' }})).addTo({m.get_name()});
       }}
       addWhenReady();
+    }})();
+    </script>
+    """
+    m.get_root().html.add_child(folium.Element(js))
+
+def inject_layercolor_badges(m: folium.Map, species_to_color: OrderedDict):
+    """
+    Adds a tiny colored circle before each species name in the LayerControl.
+    Works regardless of how Leaflet renders the label, by editing the label's <span>.
+    """
+    # Build a JS mapping of species -> color
+    mapping = {sp: color for sp, color in species_to_color.items()}
+    js = f"""
+    <script>
+    (function() {{
+      var speciesColors = {mapping!r};
+
+      function paintOnce() {{
+        var root = document.querySelector('.leaflet-control-layers-overlays');
+        if (!root) return false;
+        var labels = root.querySelectorAll('label');
+        var touched = 0;
+        labels.forEach(function(label) {{
+          var nameSpan = label.querySelector('span');
+          if (!nameSpan) return;
+          if (nameSpan.dataset.gbColored === '1') return;
+          var name = nameSpan.textContent.trim();
+          var color = speciesColors[name];
+          if (!color) return;
+          nameSpan.innerHTML = '<span style="display:inline-block;width:12px;height:12px;border:1px solid #333;border-radius:50%;margin-right:6px;vertical-align:middle;background:'+color+';"></span>' + name;
+          nameSpan.dataset.gbColored = '1';
+          touched++;
+        }});
+        return touched > 0;
+      }}
+
+      function tryPaint() {{
+        if (!paintOnce()) {{
+          setTimeout(tryPaint, 150);
+        }}
+      }}
+
+      // Initial attempt
+      tryPaint();
+
+      // If the control redraws later, repaint
+      var ctl = document.querySelector('.leaflet-control-layers');
+      if (ctl && 'MutationObserver' in window) {{
+        var obs = new MutationObserver(function() {{ paintOnce(); }});
+        obs.observe(ctl, {{ childList: true, subtree: true }});
+      }}
     }})();
     </script>
     """
@@ -414,25 +461,25 @@ def make_map(lat=CENTER_LAT, lon=CENTER_LON, radius_km=DEFAULT_RADIUS_KM,
 
     m = folium.Map(location=[lat, lon], zoom_start=zoom_start, control_scale=True)
 
+    # Info panel
     logo_src = get_logo_src()
     m.get_root().html.add_child(folium.Element(build_info_ui(radius_km, back_days, ts_display_et, logo_src)))
 
+    # Rings, controls
     add_radius_rings(m, lat, lon)
     Fullscreen().add_to(m)
-    # MiniMap removed
     m.add_child(MeasureControl(primary_length_unit="kilometers"))
     LocateControl(auto_start=False, keepCurrentZoomLevel=False).add_to(m)
     MousePosition(separator=" , ", prefix="Lat, Lon:").add_to(m)
 
     if not data:
         add_notice(m, "No current notable birds for the selected window.")
-        legend_html = build_legend_html(OrderedDict())
-        m.get_root().html.add_child(folium.Element(legend_html))
+        # No legend anymore
         add_clear_species_control(m, [])
         save_and_publish(m, outfile)
         return m, outfile
 
-    # Group observations by (lat, lon) -> species -> list of entries
+    # Group observations by (lat, lon) -> species -> list of entries for that species at that location
     loc_species = defaultdict(lambda: defaultdict(list))
     species_set = set()
     for s in data:
@@ -484,13 +531,16 @@ def make_map(lat=CENTER_LAT, lon=CENTER_LON, radius_km=DEFAULT_RADIUS_KM,
         )
 
     if not too_many:
+        # One overlay per species
         species_groups = {}
         for sp, hexcol in species_to_color.items():
+            # Name remains plain text; JS adds color swatch next to it in the control
             fg = folium.FeatureGroup(name=sp, show=True)
             cluster = MarkerCluster(name=f"{sp} markers")
             fg.add_child(cluster)
             species_groups[sp] = (fg, cluster)
             m.add_child(fg)
+
         for (slat, slon), species_dict in loc_species.items():
             for sp, entries in species_dict.items():
                 hexcol = species_to_color.get(sp, "#444444")
@@ -502,9 +552,13 @@ def make_map(lat=CENTER_LAT, lon=CENTER_LON, radius_km=DEFAULT_RADIUS_KM,
                 )
                 folium.Marker([slat, slon], icon=icon, tooltip=sp,
                               popup=folium.Popup(popup_html, max_width=320)).add_to(species_groups[sp][1])
-        folium.LayerControl(collapsed=False).add_to(m)
+
+        folium.LayerControl(collapsed=False, position="topright").add_to(m)
         add_clear_species_control(m, list(species_to_color.keys()))
+        inject_layercolor_badges(m, species_to_color)
+
     else:
+        # Too many species for per-species layers; still show a single cluster
         cluster = MarkerCluster(name="Notable sightings").add_to(m)
         for (slat, slon), species_dict in loc_species.items():
             for sp, entries in species_dict.items():
@@ -517,11 +571,13 @@ def make_map(lat=CENTER_LAT, lon=CENTER_LON, radius_km=DEFAULT_RADIUS_KM,
                 )
                 folium.Marker([slat, slon], icon=icon, tooltip=sp,
                               popup=folium.Popup(popup_html, max_width=320)).add_to(cluster)
-        folium.LayerControl(collapsed=False).add_to(m)
+
+        folium.LayerControl(collapsed=False, position="topright").add_to(m)
+        # No color badges here because there is only one overlay
         add_clear_species_control(m, list(species_to_color.keys()))
 
-    legend_html = build_legend_html(species_to_color)
-    m.get_root().html.add_child(folium.Element(legend_html))
+    # No separate legend anymore
+
     save_and_publish(m, outfile)
     return m, outfile
 
