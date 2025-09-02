@@ -1,15 +1,14 @@
 # scripts/build_map.py
 #
-# Changes in this version:
-# - No floating legend panel
-# - Each species layer in the Layers control shows a color swatch next to the checkbox and name
-#
-# Other behavior unchanged:
+# Cambridge build:
+# - Title: "Cambridge, MA & Vicinity"
+# - Center: 42.378500, -71.115600
+# - Rings at 5, 10, 15, 20 km (all labeled)
+# - Search radius set to 20 km to match outer ring
+# - Same UI as your last build: bottom-left "i" button toggles info panel aligned above it
 # - Popups list all checklists for that species at that exact location
-# - Bottom-left "i" button toggles a compact info panel aligned above it
-# - Labeled radius rings
-# - Robust logo loading (file -> data URL preferred, falls back to public URL)
-# - MiniMap removed
+# - Robust logo loading (file -> data URL; fallback to public URL)
+# - Legend raised, MiniMap removed
 
 import os
 import sys
@@ -46,10 +45,9 @@ API_KEY = os.getenv("EBIRD_API_KEY", "").strip()
 if not API_KEY:
     API_KEY = "REPLACE_WITH_YOUR_EBIRD_API_KEY"
 
-# You can change these as needed per repo
 CENTER_LAT = 42.378500
 CENTER_LON = -71.115600
-DEFAULT_RADIUS_KM = 20
+DEFAULT_RADIUS_KM = 20  # match the outer ring
 BACK_DAYS = 2
 MAX_RESULTS = 200
 ZOOM_START = 11
@@ -103,6 +101,37 @@ def get_data(lat, lon, radius_km, back_days):
     data = fetch_notable(lat, lon, radius_km, back_days)
     _CACHE[key] = data
     return data
+
+def build_legend_html(species_to_color: OrderedDict) -> str:
+    items = "".join(
+        f"<div style='display:flex;align-items:center;margin:2px 0;'>"
+        f"<span style='display:inline-block;width:12px;height:12px;background:{hexcolor};"
+        f"margin-right:6px;border:1px solid #333;flex:0 0 12px;'></span>"
+        f"<span style='font-size:12px;line-height:1.2'>{sp}</span></div>"
+        for sp, hexcolor in species_to_color.items()
+    )
+    html = f"""
+    <div id="legend" style="
+        position: fixed;
+        bottom: 48px;
+        right: 16px;
+        z-index: 900;
+        background: rgba(255,255,255,0.95);
+        padding: 8px 10px;
+        border: 1px solid #888;
+        border-radius: 6px;
+        max-height: 70vh;
+        max-width: 28vw;
+        overflow-y: auto;
+        overflow-x: hidden;
+        resize: vertical;
+        box-shadow: 0 1px 4px rgba(0,0,0,0.2);
+        ">
+        <div style="font-weight:600;margin-bottom:6px;">Species Legend</div>
+        {items if items else "<div style='font-size:12px;'>No species</div>"}
+    </div>
+    """
+    return html
 
 def add_radius_rings(m, lat, lon):
     # Center marker
@@ -204,14 +233,12 @@ def build_info_ui(radius_km: int, back_days: int, ts_display_et: str, logo_src: 
         justify-content: center;
         font: 700 18px/1 system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif;
         cursor: pointer;
-        user-select: none;
+        user-select: none.
       }}
-      .gb-info-btn:focus {{ outline: 2px solid #2c7fb8; }}
-
       .gb-info-panel {{
         position: fixed;
-        left: 16px;     /* align with the button */
-        bottom: 70px;   /* raise above button */
+        left: 16px;
+        bottom: 70px;
         z-index: 1200;
         background: rgba(255,255,255,0.98);
         border: 1px solid #999;
@@ -237,14 +264,6 @@ def build_info_ui(radius_km: int, back_days: int, ts_display_et: str, logo_src: 
         .gb-info-title {{ font-size: 15px; }}
         .gb-info-meta {{ font-size: 12px; }}
         .gb-info-row {{ font-size: 11px; }}
-      }}
-      /* Tighter Layers control spacing helps long species lists */
-      .leaflet-control-layers-overlays label {{
-        display: flex;
-        align-items: center;
-        gap: 6px;
-        line-height: 1.2;
-        margin-bottom: 4px;
       }}
     </style>
 
@@ -358,60 +377,6 @@ def add_clear_species_control(m: folium.Map, species_names):
     """
     m.get_root().html.add_child(folium.Element(js))
 
-def add_color_swatches_to_layer_control(m: folium.Map, species_to_color: OrderedDict):
-    """
-    Inject a small colored square before each species name in the Layers control.
-    We map by exact layer label text (species name).
-    """
-    mapping = dict(species_to_color)
-    js = f"""
-    <script>
-    (function() {{
-      var colorMap = {mapping!r}; // species -> hex color
-
-      function decorate() {{
-        var root = document.querySelector('.leaflet-control-layers-overlays');
-        if (!root) return false;
-        var labels = root.querySelectorAll('label');
-        labels.forEach(function(label) {{
-          // Avoid duplicating swatches
-          if (label.querySelector('.gb-swatch')) return;
-
-          // Get the plain text name for matching
-          var txt = label.textContent.trim();
-          var color = colorMap[txt];
-          if (!color) return;
-
-          // Insert swatch right after the checkbox input
-          var input = label.querySelector('input[type=checkbox]');
-          if (!input) return;
-
-          var swatch = document.createElement('span');
-          swatch.className = 'gb-swatch';
-          swatch.style.display = 'inline-block';
-          swatch.style.width = '12px';
-          swatch.style.height = '12px';
-          swatch.style.border = '1px solid #222';
-          swatch.style.margin = '0 6px 0 6px';
-          swatch.style.background = color;
-
-          // Insert after checkbox input
-          input.insertAdjacentElement('afterend', swatch);
-        }});
-        return true;
-      }}
-
-      function whenReady() {{
-        if (!decorate()) {{
-          setTimeout(whenReady, 200);
-        }}
-      }}
-      whenReady();
-    }})();
-    </script>
-    """
-    m.get_root().html.add_child(folium.Element(js))
-
 def prune_archive(dirpath: str, keep: int = 30) -> int:
     try:
         files = [f for f in os.listdir(dirpath)
@@ -449,7 +414,6 @@ def make_map(lat=CENTER_LAT, lon=CENTER_LON, radius_km=DEFAULT_RADIUS_KM,
 
     m = folium.Map(location=[lat, lon], zoom_start=zoom_start, control_scale=True)
 
-    # Info UI with robust logo src
     logo_src = get_logo_src()
     m.get_root().html.add_child(folium.Element(build_info_ui(radius_km, back_days, ts_display_et, logo_src)))
 
@@ -462,12 +426,13 @@ def make_map(lat=CENTER_LAT, lon=CENTER_LON, radius_km=DEFAULT_RADIUS_KM,
 
     if not data:
         add_notice(m, "No current notable birds for the selected window.")
-        # No legend injection here by design
+        legend_html = build_legend_html(OrderedDict())
+        m.get_root().html.add_child(folium.Element(legend_html))
         add_clear_species_control(m, [])
         save_and_publish(m, outfile)
         return m, outfile
 
-    # Group observations by (lat, lon) -> species -> list of entries for that species at that location
+    # Group observations by (lat, lon) -> species -> list of entries
     loc_species = defaultdict(lambda: defaultdict(list))
     species_set = set()
     for s in data:
@@ -519,7 +484,6 @@ def make_map(lat=CENTER_LAT, lon=CENTER_LON, radius_km=DEFAULT_RADIUS_KM,
         )
 
     if not too_many:
-        # One layer per species, cluster within it
         species_groups = {}
         for sp, hexcol in species_to_color.items():
             fg = folium.FeatureGroup(name=sp, show=True)
@@ -527,7 +491,6 @@ def make_map(lat=CENTER_LAT, lon=CENTER_LON, radius_km=DEFAULT_RADIUS_KM,
             fg.add_child(cluster)
             species_groups[sp] = (fg, cluster)
             m.add_child(fg)
-
         for (slat, slon), species_dict in loc_species.items():
             for sp, entries in species_dict.items():
                 hexcol = species_to_color.get(sp, "#444444")
@@ -537,19 +500,11 @@ def make_map(lat=CENTER_LAT, lon=CENTER_LON, radius_km=DEFAULT_RADIUS_KM,
                     html=f"<div style='width:14px;height:14px;border-radius:50%;background:{hexcol};border:1.5px solid #222;'></div>",
                     icon_size=(14, 14), icon_anchor=(7, 7),
                 )
-                folium.Marker(
-                    [slat, slon],
-                    icon=icon,
-                    tooltip=sp,
-                    popup=folium.Popup(popup_html, max_width=320)
-                ).add_to(species_groups[sp][1])
-
+                folium.Marker([slat, slon], icon=icon, tooltip=sp,
+                              popup=folium.Popup(popup_html, max_width=320)).add_to(species_groups[sp][1])
         folium.LayerControl(collapsed=False).add_to(m)
         add_clear_species_control(m, list(species_to_color.keys()))
-        add_color_swatches_to_layer_control(m, species_to_color)
-
     else:
-        # Single clustered layer if too many species
         cluster = MarkerCluster(name="Notable sightings").add_to(m)
         for (slat, slon), species_dict in loc_species.items():
             for sp, entries in species_dict.items():
@@ -560,18 +515,13 @@ def make_map(lat=CENTER_LAT, lon=CENTER_LON, radius_km=DEFAULT_RADIUS_KM,
                     html=f"<div style='width:14px;height:14px;border-radius:50%;background:{hexcol};border:1.5px solid #222;'></div>",
                     icon_size=(14, 14), icon_anchor=(7, 7),
                 )
-                folium.Marker(
-                    [slat, slon],
-                    icon=icon,
-                    tooltip=sp,
-                    popup=folium.Popup(popup_html, max_width=320)
-                ).add_to(cluster)
-
+                folium.Marker([slat, slon], icon=icon, tooltip=sp,
+                              popup=folium.Popup(popup_html, max_width=320)).add_to(cluster)
         folium.LayerControl(collapsed=False).add_to(m)
         add_clear_species_control(m, list(species_to_color.keys()))
-        add_color_swatches_to_layer_control(m, species_to_color)
 
-    # No legend added here on purpose
+    legend_html = build_legend_html(species_to_color)
+    m.get_root().html.add_child(folium.Element(legend_html))
     save_and_publish(m, outfile)
     return m, outfile
 
