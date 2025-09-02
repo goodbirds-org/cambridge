@@ -1,10 +1,15 @@
 # scripts/build_map.py
 #
-# Changes in this version:
-# - Removed the separate on-map legend box
-# - Inject a colored swatch next to each species name inside the LayerControl
-# - Keeps prior behavior: info "i" panel aligned above button, labeled radius rings,
-#   popups list all checklists for that species at that lat/lon, no MiniMap
+# What this version does:
+# - LayerControl shows each species with a colored dot + the species name tinted to that color
+# - You can still toggle species on and off via the LayerControl checkboxes
+# - No separate legend box
+# - Popups list all checklists for that species at that lat/lon
+# - Bottom-left "i" info panel with logo, aligned above its button
+# - Labeled radius rings at 5, 10, 15, 20 km
+# - No MiniMap
+#
+# You can override defaults via env vars (CENTER_LAT, CENTER_LON, DEFAULT_RADIUS_KM, etc.)
 
 import os
 import sys
@@ -19,7 +24,7 @@ import folium
 from folium.plugins import MarkerCluster, Fullscreen, MeasureControl, LocateControl, MousePosition
 
 try:
-    from IPython.display import display  # noqa: F401
+    from IPython.display import display  # type: ignore
     IN_NOTEBOOK = True
 except Exception:
     IN_NOTEBOOK = False
@@ -41,7 +46,7 @@ API_KEY = os.getenv("EBIRD_API_KEY", "").strip()
 if not API_KEY:
     API_KEY = "REPLACE_WITH_YOUR_EBIRD_API_KEY"
 
-# Defaults can be overridden via env if you reuse this script elsewhere
+# Defaults for the Cambridge build
 CENTER_LAT = float(os.getenv("CENTER_LAT", "42.378500"))
 CENTER_LON = float(os.getenv("CENTER_LON", "-71.115600"))
 DEFAULT_RADIUS_KM = int(os.getenv("DEFAULT_RADIUS_KM", "20"))
@@ -166,7 +171,7 @@ def _file_to_data_url(path: str) -> str:
         return ""
 
 def get_logo_src() -> str:
-    # Prefer embedded data URL from local file so map HTML is self-contained
+    # Prefer embedded data URL so the map HTML is self-contained
     if MAP_LOGO_FILE and os.path.isfile(MAP_LOGO_FILE):
         d = _file_to_data_url(MAP_LOGO_FILE)
         if d:
@@ -305,7 +310,6 @@ def build_info_ui(radius_km: int, back_days: int, ts_display_et: str, logo_src: 
           closePanel();
         }});
 
-        // Close panel when clicking outside it
         document.addEventListener('click', function(e) {{
           if (!panel.contains(e.target) && e.target !== btn) {{
             closePanel();
@@ -336,7 +340,7 @@ def add_clear_species_control(m: folium.Map, species_names):
         labels.forEach(function(label){{
           var input = label.querySelector('input[type=checkbox]');
           if(!input) return;
-          var nameSpan = label.querySelector('span');
+          var nameSpan = label.querySelector('.gb-layer-name');
           var name = nameSpan ? nameSpan.textContent.trim() : label.textContent.trim();
           if (speciesSet.has(name) && input.checked) {{
             input.click();
@@ -373,12 +377,11 @@ def add_clear_species_control(m: folium.Map, species_names):
     """
     m.get_root().html.add_child(folium.Element(js))
 
-def inject_layercolor_badges(m: folium.Map, species_to_color: OrderedDict):
+def style_layercontrol_species(m: folium.Map, species_to_color: OrderedDict):
     """
-    Adds a tiny colored circle before each species name in the LayerControl.
-    Works regardless of how Leaflet renders the label, by editing the label's <span>.
+    Adds a colored dot and tints the species name text inside the LayerControl.
+    Leaves checkboxes intact so toggling works as usual.
     """
-    # Build a JS mapping of species -> color
     mapping = {sp: color for sp, color in species_to_color.items()}
     js = f"""
     <script>
@@ -390,15 +393,42 @@ def inject_layercolor_badges(m: folium.Map, species_to_color: OrderedDict):
         if (!root) return false;
         var labels = root.querySelectorAll('label');
         var touched = 0;
+
         labels.forEach(function(label) {{
-          var nameSpan = label.querySelector('span');
-          if (!nameSpan) return;
-          if (nameSpan.dataset.gbColored === '1') return;
-          var name = nameSpan.textContent.trim();
+          // Leaflet renders: <label><div><input ...><span>Species Name</span></div></label>
+          var span = label.querySelector('span');
+          if (!span) return;
+
+          // Do not double paint
+          if (span.classList.contains('gb-layer-name')) return;
+
+          var name = span.textContent.trim();
           var color = speciesColors[name];
           if (!color) return;
-          nameSpan.innerHTML = '<span style="display:inline-block;width:12px;height:12px;border:1px solid #333;border-radius:50%;margin-right:6px;vertical-align:middle;background:'+color+';"></span>' + name;
-          nameSpan.dataset.gbColored = '1';
+
+          // Build: [dot] [colored name]
+          var dot = document.createElement('span');
+          dot.setAttribute('aria-hidden', 'true');
+          dot.style.display = 'inline-block';
+          dot.style.width = '12px';
+          dot.style.height = '12px';
+          dot.style.border = '1px solid #333';
+          dot.style.borderRadius = '50%';
+          dot.style.marginRight = '6px';
+          dot.style.verticalAlign = 'middle';
+          dot.style.background = color;
+
+          var nameNode = document.createElement('span');
+          nameNode.className = 'gb-layer-name';
+          nameNode.textContent = name;
+          nameNode.style.color = color;
+          nameNode.style.fontWeight = '600';
+
+          // Replace original span contents
+          span.textContent = '';
+          span.appendChild(dot);
+          span.appendChild(nameNode);
+
           touched++;
         }});
         return touched > 0;
@@ -410,10 +440,8 @@ def inject_layercolor_badges(m: folium.Map, species_to_color: OrderedDict):
         }}
       }}
 
-      // Initial attempt
+      // Initial attempt and repaint on DOM changes
       tryPaint();
-
-      // If the control redraws later, repaint
       var ctl = document.querySelector('.leaflet-control-layers');
       if (ctl && 'MutationObserver' in window) {{
         var obs = new MutationObserver(function() {{ paintOnce(); }});
@@ -474,7 +502,7 @@ def make_map(lat=CENTER_LAT, lon=CENTER_LON, radius_km=DEFAULT_RADIUS_KM,
 
     if not data:
         add_notice(m, "No current notable birds for the selected window.")
-        # No legend anymore
+        # No separate legend anymore
         add_clear_species_control(m, [])
         save_and_publish(m, outfile)
         return m, outfile
@@ -534,7 +562,6 @@ def make_map(lat=CENTER_LAT, lon=CENTER_LON, radius_km=DEFAULT_RADIUS_KM,
         # One overlay per species
         species_groups = {}
         for sp, hexcol in species_to_color.items():
-            # Name remains plain text; JS adds color swatch next to it in the control
             fg = folium.FeatureGroup(name=sp, show=True)
             cluster = MarkerCluster(name=f"{sp} markers")
             fg.add_child(cluster)
@@ -555,10 +582,10 @@ def make_map(lat=CENTER_LAT, lon=CENTER_LON, radius_km=DEFAULT_RADIUS_KM,
 
         folium.LayerControl(collapsed=False, position="topright").add_to(m)
         add_clear_species_control(m, list(species_to_color.keys()))
-        inject_layercolor_badges(m, species_to_color)
+        style_layercontrol_species(m, species_to_color)
 
     else:
-        # Too many species for per-species layers; still show a single cluster
+        # Too many species for per-species layers; single clustered overlay
         cluster = MarkerCluster(name="Notable sightings").add_to(m)
         for (slat, slon), species_dict in loc_species.items():
             for sp, entries in species_dict.items():
@@ -573,10 +600,10 @@ def make_map(lat=CENTER_LAT, lon=CENTER_LON, radius_km=DEFAULT_RADIUS_KM,
                               popup=folium.Popup(popup_html, max_width=320)).add_to(cluster)
 
         folium.LayerControl(collapsed=False, position="topright").add_to(m)
-        # No color badges here because there is only one overlay
+        # Nothing to color in the control when there's only one overlay, but keep clear button harmless
         add_clear_species_control(m, list(species_to_color.keys()))
 
-    # No separate legend anymore
+    # No separate legend
 
     save_and_publish(m, outfile)
     return m, outfile
